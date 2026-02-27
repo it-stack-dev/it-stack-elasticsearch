@@ -1,0 +1,57 @@
+# it-stack-elasticsearch.yml — IT-Stack Module Manifest
+# Module 05: Elasticsearch search and log indexing
+
+module:
+  name: elasticsearch
+  number: "05"
+  repo: it-stack-dev/it-stack-elasticsearch
+  version: "0.1.0"
+  phase: 4
+  category: database
+  server: lab-db1
+  description: "Elasticsearch search and log indexing"
+
+upstream:
+  name: Elasticsearch
+  image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+  license: Elastic-2.0
+
+ports:
+  - 9200 (REST API)
+   - 9300 (Cluster)
+
+labs:
+  - id: "05-01"
+    name: Standalone
+    docker_compose: docker/docker-compose.standalone.yml
+    test_script: tests/labs/test-lab-05-01.sh
+  - id: "05-02"
+    name: External Dependencies
+    docker_compose: docker/docker-compose.lan.yml
+    test_script: tests/labs/test-lab-05-02.sh
+  - id: "05-03"
+    name: Advanced Features
+    docker_compose: docker/docker-compose.advanced.yml
+    test_script: tests/labs/test-lab-05-03.sh
+  - id: "05-04"
+    name: SSO Integration
+    docker_compose: docker/docker-compose.sso.yml
+    test_script: tests/labs/test-lab-05-04.sh
+  - id: "05-05"
+    name: Advanced Integration
+    docker_compose: docker/docker-compose.integration.yml
+    test_script: tests/labs/test-lab-05-05.sh
+  - id: "05-06"
+    name: Production Deployment
+    docker_compose: docker/docker-compose.production.yml
+    test_script: tests/labs/test-lab-05-06.sh
+
+resources:
+  cpu_cores: 2
+  ram_gb: 8
+  disk_gb: 20
+
+health_check:
+  endpoint: /health
+  metrics_endpoint: /metrics
+  log_path: /var/log/elasticsearch/

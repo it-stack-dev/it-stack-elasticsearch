@@ -1,0 +1,36 @@
+# Lab 02 — External Dependencies: elasticsearch with external PostgreSQL and Redis
+---
+services:
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: it-stack-elasticsearch
+    restart: unless-stopped
+    ports:
+      - "9200:$firstPort"
+    environment:
+      - IT_STACK_ENV=lab-02-lan
+      - DB_HOST=
+      - DB_PORT=5432
+      - REDIS_HOST=
+    networks:
+      - it-stack-net
+
+  # Lightweight local DB for lab (replace with lab-db1 in real env)
+  postgres:
+    image: postgres:16
+    container_name: it-stack-elasticsearch-db
+    environment:
+      POSTGRES_DB: elasticsearch_db
+      POSTGRES_USER: elasticsearch_user
+      POSTGRES_PASSWORD: elasticsearch_pass
+    volumes:
+      - elasticsearch_pg_data:/var/lib/postgresql/data
+    networks:
+      - it-stack-net
+
+networks:
+  it-stack-net:
+    driver: bridge
+
+volumes:
+  elasticsearch_pg_data:
