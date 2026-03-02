@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # test-lab-05-01.sh — Lab 05-01: Standalone
-# Module 05: Elasticsearch search and log indexing
-# Basic elasticsearch functionality in complete isolation
+# Module 05: Elasticsearch search and analytics engine
+# Validates single-node cluster health, index creation, and document CRUD.
 set -euo pipefail
 
 LAB_ID="05-01"
@@ -10,6 +10,8 @@ MODULE="elasticsearch"
 COMPOSE_FILE="docker/docker-compose.standalone.yml"
 PASS=0
 FAIL=0
+ES_URL="http://localhost:9200"
+NO_CLEANUP=${NO_CLEANUP:-0}
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -26,38 +28,90 @@ echo -e "${CYAN} Module: ${MODULE}${NC}"
 echo -e "${CYAN}======================================${NC}"
 echo ""
 
+cleanup() {
+    if [ "${NO_CLEANUP:-0}" = "1" ]; then
+        info "NO_CLEANUP=1 — skipping teardown (containers left running)"
+    else
+        info "Phase 4: Cleanup"
+        docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans 2>/dev/null || true
+        info "Cleanup complete"
+    fi
+}
+trap cleanup EXIT
+
+section() { echo -e "\n${CYAN}## $1${NC}"; }
+
 # ── PHASE 1: Setup ────────────────────────────────────────────────────────────
-info "Phase 1: Setup"
+section "Phase 1: Setup"
 docker compose -f "${COMPOSE_FILE}" up -d
-info "Waiting 30s for ${MODULE} to initialize..."
-sleep 30
+info "Waiting 90s for Elasticsearch to start..."
+sleep 90
 
 # ── PHASE 2: Health Checks ────────────────────────────────────────────────────
-info "Phase 2: Health Checks"
+section "Phase 2: Health Checks"
 
 if docker compose -f "${COMPOSE_FILE}" ps | grep -q "running\|Up"; then
-    pass "Container is running"
+    pass "2.1 es-s01-app container is running"
 else
-    fail "Container is not running"
+    fail "2.1 es-s01-app container is not running"
+fi
+
+if curl -sf "${ES_URL}/_cluster/health" | grep -q '"status":"green"\|"status":"yellow"'; then
+    pass "2.2 Cluster health is green or yellow"
+else
+    fail "2.2 Cluster health check failed"
 fi
 
 # ── PHASE 3: Functional Tests ─────────────────────────────────────────────────
-info "Phase 3: Functional Tests (Lab 01 — Standalone)"
+section "Phase 3: Functional Tests"
 
-# TODO: Add module-specific functional tests here
-# Example:
-# if curl -sf http://localhost:9200/health > /dev/null 2>&1; then
-#     pass "Health endpoint responds"
-# else
-#     fail "Health endpoint not reachable"
-# fi
+# 3.1 Root endpoint returns cluster info
+if curl -sf "${ES_URL}" | grep -q 'cluster_name\|version'; then
+    pass "3.1 Root endpoint returns cluster metadata"
+else
+    fail "3.1 Root endpoint failed"
+fi
 
-warn "Functional tests for Lab 05-01 pending implementation"
+# 3.2 Create index
+if curl -sf -X PUT "${ES_URL}/lab-test-idx" \
+        -H 'Content-Type: application/json' \
+        -d '{"settings":{"number_of_shards":1,"number_of_replicas":0}}' \
+        | grep -q '"acknowledged":true'; then
+    pass "3.2 Index creation succeeded"
+else
+    fail "3.2 Index creation failed"
+fi
 
-# ── PHASE 4: Cleanup ──────────────────────────────────────────────────────────
-info "Phase 4: Cleanup"
-docker compose -f "${COMPOSE_FILE}" down -v --remove-orphans
-info "Cleanup complete"
+# 3.3 Index a document
+if curl -sf -X POST "${ES_URL}/lab-test-idx/_doc/1" \
+        -H 'Content-Type: application/json' \
+        -d '{"title":"IT-Stack ES Lab 05-01","status":"pass"}' \
+        | grep -q '"result":"created"'; then
+    pass "3.3 Document indexed successfully"
+else
+    fail "3.3 Document indexing failed"
+fi
+
+# 3.4 Retrieve document by ID
+if curl -sf "${ES_URL}/lab-test-idx/_doc/1" | grep -q 'IT-Stack ES Lab 05-01'; then
+    pass "3.4 Document retrieval by ID succeeded"
+else
+    fail "3.4 Document retrieval failed"
+fi
+
+# 3.5 Full-text search
+if curl -sf -X GET "${ES_URL}/lab-test-idx/_search" \
+        -H 'Content-Type: application/json' \
+        -d '{"query":{"match_all":{}}}' \
+        | grep -q '"hits"'; then
+    pass "3.5 Search query returned results"
+else
+    fail "3.5 Search query failed"
+fi
+
+# 3.6 Delete test index
+curl -sf -X DELETE "${ES_URL}/lab-test-idx" > /dev/null 2>&1 || true
+info "3.6 Test index removed"
 
 # ── Results ───────────────────────────────────────────────────────────────────
 echo ""

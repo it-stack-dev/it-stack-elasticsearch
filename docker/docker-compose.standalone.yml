@@ -1,29 +1,45 @@
-# Lab 01 — Standalone: Complete Elasticsearch search and log indexing in isolation
-# No external dependencies required.
+# Lab 01 — Standalone: Elasticsearch search and analytics engine in isolation
+# No external dependencies required — single-node, security disabled for lab use.
 ---
+name: it-stack-elasticsearch-lab01
+
 services:
-  elasticsearch:
+
+  es-s01-app:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: it-stack-elasticsearch
+    container_name: es-s01-app
     restart: unless-stopped
-    ports:
-      - "9200:$firstPort"
     environment:
-      - IT_STACK_ENV=lab-01-standalone
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=it-stack-lab01
+      - node.name=es-s01-app
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
     volumes:
-      - elasticsearch_data:/var/lib/elasticsearch
+      - es-s01-data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost/health || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?pretty | grep -q 'green\\|yellow' || exit 1"]
       interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      timeout: 15s
+      retries: 8
+      start_period: 90s
     networks:
-      - it-stack-net
+      - es-s01-net
 
 networks:
-  it-stack-net:
+  es-s01-net:
     driver: bridge
 
 volumes:
-  elasticsearch_data:
+  es-s01-data:
