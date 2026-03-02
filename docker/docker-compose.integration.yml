@@ -1,26 +1,177 @@
-# Lab 05 — Advanced Integration: elasticsearch with full IT-Stack ecosystem
----
-services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: it-stack-elasticsearch
-    restart: unless-stopped
-    ports:
-      - "9200:$firstPort"
-    environment:
-      - IT_STACK_ENV=lab-05-integration
-      - KEYCLOAK_URL=
-      - DB_HOST=
-      - REDIS_HOST=
-      - SMTP_HOST=
-      - GRAYLOG_HOST=
-    extra_hosts:
-      - "lab-id1:10.0.50.11"
-      - "lab-db1:10.0.50.12"
-      - "lab-proxy1:10.0.50.15"
-    networks:
-      - it-stack-net
+# =============================================================================
+# IT-Stack: Elasticsearch — Lab 05: Advanced Integration
+# Module 05 · Phase 4 · Lab 05
+# =============================================================================
+# Services: Elasticsearch · Kibana · OpenLDAP · Keycloak · WireMock (Graylog-mock)
+# Ports:    Kibana:5640  WireMock:8760  Keycloak:8505  LDAP:3884
+# Credentials:
+#   Elastic:   elastic / ElasticLab05!
+#   Keycloak:  admin / Admin05!
+#   LDAP:      cn=admin,dc=lab,dc=local / LdapLab05!
+# What's new vs Lab 04:
+#   + WireMock 3.x simulates Graylog REST API (/api/system, /api/search)
+#   + Kibana configured with GRAYLOG_API_URL pointing to WireMock
+#   + Integration tested: Kibana → Graylog API (log federation)
+# =============================================================================
 
+name: it-stack-elasticsearch-lab05
+
+services:
+
+  # ── Elasticsearch ──────────────────────────────────────────────────────────
+  elastic-i05-es:
+    image: elasticsearch:8.13.0
+    container_name: elastic-i05-es
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=ElasticLab05!
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf -u elastic:ElasticLab05! http://localhost:9200/_cluster/health | grep -q '\"status\"' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks:
+      - elastic-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ── Kibana ─────────────────────────────────────────────────────────────────
+  elastic-i05-kib:
+    image: kibana:8.13.0
+    container_name: elastic-i05-kib
+    restart: unless-stopped
+    depends_on:
+      elastic-i05-es:
+        condition: service_healthy
+    ports:
+      - "5640:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elastic-i05-es:9200
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: ElasticLab05!
+      KEYCLOAK_URL: http://elastic-i05-kc:8080
+      KEYCLOAK_REALM: it-stack
+      KEYCLOAK_CLIENT_ID: kibana
+      # Graylog integration (via WireMock)
+      GRAYLOG_API_URL: http://elastic-i05-mock:8080
+      GRAYLOG_API_USER: admin
+      GRAYLOG_API_TOKEN: lab-graylog-token-05
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q 'available\|green\|yellow' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    networks:
+      - elastic-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ── OpenLDAP ───────────────────────────────────────────────────────────────
+  elastic-i05-ldap:
+    image: osixia/openldap:1.5.0
+    container_name: elastic-i05-ldap
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "IT-Stack Lab"
+      LDAP_DOMAIN: lab.local
+      LDAP_ADMIN_PASSWORD: LdapLab05!
+      LDAP_CONFIG_PASSWORD: ConfigLab05!
+      LDAP_BASE_DN: dc=lab,dc=local
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: ReadOnly05!
+    ports:
+      - "3884:389"
+    volumes:
+      - elastic-i05-ldap-data:/var/lib/ldap
+      - elastic-i05-ldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapLab05! cn=admin > /dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      - elastic-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+  # ── Keycloak ───────────────────────────────────────────────────────────────
+  elastic-i05-kc:
+    image: quay.io/keycloak/keycloak:24.0.3
+    container_name: elastic-i05-kc
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Admin05!
+      KC_HEALTH_ENABLED: "true"
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8505:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/master || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+    networks:
+      - elastic-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+
+  # ── WireMock — Graylog REST API mock ───────────────────────────────────────
+  elastic-i05-mock:
+    image: wiremock/wiremock:3.3.1
+    container_name: elastic-i05-mock
+    restart: unless-stopped
+    command: >
+      --port=8080
+      --verbose
+      --global-response-templating
+    ports:
+      - "8760:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/__admin/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - elastic-i05-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.25"
+
+# ── Networks ───────────────────────────────────────────────────────────────────
 networks:
-  it-stack-net:
+  elastic-i05-net:
+    name: elastic-i05-net
     driver: bridge
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  elastic-i05-es-data:
+  elastic-i05-ldap-data:
+  elastic-i05-ldap-config:
