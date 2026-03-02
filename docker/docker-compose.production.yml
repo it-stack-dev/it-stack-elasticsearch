@@ -1,12 +1,191 @@
-# Lab 06 — Production: elasticsearch HA-ready with monitoring and external volumes
----
+# =============================================================================
+# IT-Stack: Elasticsearch — Lab 06: Production Deployment
+# Module 05 · Phase 4 · Lab 06
+# =============================================================================
+# Services: Elasticsearch · Kibana · OpenLDAP · Keycloak
+# Ports:    Kibana:5650  KC:8550  LDAP:3870
+# Credentials:
+#   Kibana/ES: kibana_system / KibanaProd06!  elastic / ElasticProd06!
+#   Keycloak:  admin / Admin06!
+#   LDAP:      cn=admin,dc=lab,dc=local / LdapProd06!
+# Production features vs Lab 05:
+#   + restart: unless-stopped on ALL services
+#   + Resource limits AND reservations on every service
+#   + Production JVM heap settings (ES_JAVA_OPTS)
+#   + Dedicated ES cluster name + node name
+#   + IT_STACK_ENV: production  IT_STACK_LAB: "06" labels
+#   + ILM policy hint via ELASTIC_ILM_ENABLED env
+#   + Healthcheck start_period on all long-boot services
+# =============================================================================
+
+name: it-stack-elasticsearch-lab06
+
 services:
-  elasticsearch:
+
+  # ── Elasticsearch ────────────────────────────────────────────────────────────
+  elastic-p06-es:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
-    container_name: it-stack-elasticsearch
-    restart: always
+    container_name: elastic-p06-es
+    restart: unless-stopped
+    environment:
+      - node.name=elastic-p06-es
+      - cluster.name=it-stack-prod
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ELASTIC_PASSWORD=ElasticProd06!
+      - IT_STACK_ENV=production
+      - IT_STACK_MODULE=elasticsearch
+      - IT_STACK_LAB=06
+      - ELASTIC_ILM_ENABLED=true
+      - ELASTIC_ILM_HOT_DAYS=7
+      - ELASTIC_ILM_WARM_DAYS=30
+      - ELASTIC_ILM_DELETE_DAYS=90
+    volumes:
+      - elastic-p06-es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -q '\"status\"' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 60s
+    networks:
+      - elastic-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+
+  # ── Kibana ──────────────────────────────────────────────────────────────────
+  elastic-p06-kib:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    container_name: elastic-p06-kib
+    restart: unless-stopped
+    depends_on:
+      elastic-p06-es:
+        condition: service_healthy
+      elastic-p06-kc:
+        condition: service_healthy
     ports:
-      - "9200:$firstPort"
+      - "5650:5601"
+    environment:
+      ELASTICSEARCH_HOSTS: http://elastic-p06-es:9200
+      KIBANA_SYSTEM_PASSWORD: KibanaProd06!
+      IT_STACK_ENV: production
+      IT_STACK_MODULE: elasticsearch
+      IT_STACK_LAB: "06"
+      XPACK_SECURITY_ENABLED: "false"
+      XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY: "elasticProd06EncryptionKey12345"
+      SERVER_NAME: kibana-lab06
+      SERVER_PUBLICBASEURL: http://localhost:5650
+      KEYCLOAK_URL: http://elastic-p06-kc:8080
+      KEYCLOAK_REALM: it-stack
+      KEYCLOAK_CLIENT_ID: kibana
+      GRAYLOG_API_URL: http://graylog.lab.local:9000
+      GRAYLOG_API_USER: admin
+      GRAYLOG_API_TOKEN: prod-graylog-token
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -q version || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    networks:
+      - elastic-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+
+  # ── OpenLDAP ───────────────────────────────────────────────────────────────
+  elastic-p06-ldap:
+    image: osixia/openldap:1.5.0
+    container_name: elastic-p06-ldap
+    restart: unless-stopped
+    environment:
+      LDAP_ORGANISATION: "IT-Stack Production"
+      LDAP_DOMAIN: lab.local
+      LDAP_ADMIN_PASSWORD: LdapProd06!
+      LDAP_CONFIG_PASSWORD: ConfigProd06!
+      LDAP_BASE_DN: dc=lab,dc=local
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: ReadOnlyProd06!
+    ports:
+      - "3870:389"
+    volumes:
+      - elastic-p06-ldap-data:/var/lib/ldap
+      - elastic-p06-ldap-config:/etc/ldap/slapd.d
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost -b dc=lab,dc=local -D cn=admin,dc=lab,dc=local -w LdapProd06! cn=admin > /dev/null 2>&1 && echo ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - elastic-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          cpus: "0.1"
+          memory: 64M
+
+  # ── Keycloak ───────────────────────────────────────────────────────────────
+  elastic-p06-kc:
+    image: quay.io/keycloak/keycloak:24.0.3
+    container_name: elastic-p06-kc
+    restart: unless-stopped
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: Admin06!
+      KC_HEALTH_ENABLED: "true"
+      KC_DB: dev-file
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+    ports:
+      - "8550:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/realms/master || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - elastic-p06-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+# ── Networks ───────────────────────────────────────────────────────────────────
+networks:
+  elastic-p06-net:
+    name: elastic-p06-net
+    driver: bridge
+
+# ── Volumes ────────────────────────────────────────────────────────────────────
+volumes:
+  elastic-p06-es-data:
+  elastic-p06-ldap-data:
+  elastic-p06-ldap-config:
     environment:
       - IT_STACK_ENV=production
       - KEYCLOAK_URL=
