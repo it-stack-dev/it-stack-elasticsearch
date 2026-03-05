@@ -29,7 +29,7 @@ services:
     volumes:
       - es-s01-data:/usr/share/elasticsearch/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?pretty | grep -qE 'green\|yellow' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health?pretty | grep -qE 'green|yellow' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 8

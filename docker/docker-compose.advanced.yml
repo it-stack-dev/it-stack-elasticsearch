@@ -41,7 +41,7 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE 'green\|yellow' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health | grep -qE 'green|yellow' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 8
@@ -76,7 +76,7 @@ services:
         max-size: "50m"
         max-file: "3"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -qE 'available\|green\|yellow' || exit 1"]
+      test: ["CMD-SHELL", "curl -sf http://localhost:5601/api/status | grep -qE 'available|green|yellow' || exit 1"]
       interval: 30s
       timeout: 15s
       retries: 10
